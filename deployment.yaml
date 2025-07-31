@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: adetola-portfolio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: adetola-portfolio
+  template:
+    metadata:
+      labels:
+        app: adetola-portfolio
+    spec:
+      containers:
+      - name: adetola-container
+        image: teeboss/adetola-portfolio:v6
+        ports:
+        - containerPort: 80
