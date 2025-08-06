@@ -1,161 +1,391 @@
-# Kubernetes Portfolio Project: `adetola-k8s-portfolio`
+# Kubernetes Portfolio Project
 
+A comprehensive guide to deploying a portfolio application on Kubernetes using Kind, Helm, ArgoCD, Prometheus, and Grafana for a complete GitOps and monitoring setup.
 
-## 🗂️ Table of Contents
+## 📋 Table of Contents
 
-1. [Architecture Diagram](#architecture-diagram)
-2. [Phase 1 – Local Kubernetes Cluster Setup](#phase-1)
-3. [Phase 2 – GitOps Deployment with ArgoCD](#phase-2)
-4. [Phase 3 – Monitoring with Prometheus and Grafana](#phase-3)
-5. [Challenges Faced](#challenges-faced)
-6. [Future Improvements](#future-improvements)
-7. [Appendix](#appendix)
+- [Prerequisites](#prerequisites)
+- [Phase 1: Local Kubernetes Setup with Kind](#phase-1-local-kubernetes-setup-with-kind)
+- [Phase 2: Application Deployment](#phase-2-application-deployment)
+- [Phase 3: GitOps with Helm and ArgoCD](#phase-3-gitops-with-helm-and-argocd)
+- [Phase 4: Monitoring with Prometheus and Grafana](#phase-4-monitoring-with-prometheus-and-grafana)
+- [Troubleshooting](#troubleshooting)
 
----
+## Prerequisites
 
+- Ubuntu/Linux system
+- Basic knowledge of Kubernetes, Docker, and YAML
+- GitHub account for GitOps workflow
 
-## ⚙️ Phase 1: Local Kubernetes Cluster Setup
+## Phase 1: Local Kubernetes Setup with Kind
 
-### Tools:
-
-* Docker
-* kind (Kubernetes in Docker)
-* kubectl
-
-### Steps:
+### Step 1: Install Docker
 
 ```bash
-# Install Docker
 sudo apt update
 sudo apt install docker.io -y
 sudo systemctl enable docker
 sudo systemctl start docker
 
-# Install kind
-curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.22.0/kind-linux-amd64
+# Add user to docker group to run without sudo
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
+### Step 2: Install Kind
+
+```bash
+curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64
 chmod +x ./kind
 sudo mv ./kind /usr/local/bin/kind
+```
 
-# Create a kind cluster
-kind create cluster --name adetola-cluster
+### Step 3: Create Local Cluster
 
-# Confirm cluster is running
+```bash
+kind create cluster
+```
+
+Expected output:
+```
+Creating cluster "kind" ...
+✓ Ensuring node image ...
+✓ Preparing nodes ...
+✓ Writing configuration ...
+✓ Starting control-plane ...
+✓ Installing CNI ...
+✓ Installing StorageClass ...
+Set kubectl context to "kind-kind"
+```
+
+### Step 4: Verify Cluster
+
+```bash
+kubectl config current-context
 kubectl get nodes
 ```
 
----
-
-## 🚀 Phase 2: GitOps Deployment with ArgoCD
-
-### Tools:
-
-* Helm
-* ArgoCD
-* GitHub: [adetola-k8s-portfolio](https://github.com/Adetola-Adedoyin/adetola-k8s-portfolio)
-
-### Steps:
-
-```bash
-# Install Helm
-curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-
-# Create Helm chart
-helm create adetola-portfolio
-
-# Edit values.yaml to include Docker image hosted on Docker Hub:
-# image:
-#   repository: adetola/<image-name>
-#   tag: latest
-
-# Deploy the Helm chart locally (for testing)
-helm install adetola-release ./adetola-portfolio
-
-# Install ArgoCD in 'argocd' namespace
-kubectl create namespace argocd
-kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
-
-# Patch ArgoCD service to expose it via NodePort
-kubectl patch svc argocd-server -n argocd \
-  -p '{"spec": {"type": "NodePort"}}'
-
-# Get ArgoCD admin password
-kubectl get secret argocd-initial-admin-secret -n argocd \
-  -o jsonpath="{.data.password}" | base64 -d && echo
-
-# Access ArgoCD dashboard at http://<NODE-IP>:<ARGOCD-NODEPORT>
-
-# Log in using the CLI (optional)
-argocd login <NODE-IP>:<ARGOCD-NODEPORT> --username admin --password <PASSWORD>
-
-# Connect GitHub repo
-argocd repo add https://github.com/Adetola-Adedoyin/adetola-k8s-portfolio.git
-
-# Create Application using CLI or ArgoCD UI and sync
+Expected output:
+```
+NAME                 STATUS   ROLES           AGE   VERSION
+kind-control-plane   Ready    control-plane   Xs    v1.XX.X
 ```
 
----
+## Phase 2: Application Deployment
 
-## 📊 Phase 3: Monitoring with Prometheus & Grafana
+### Step 1: Create Deployment Configuration
 
-### Tools:
+Create `deployment.yaml`:
 
-* Prometheus Operator (`kube-prometheus-stack`)
-* Grafana
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: adetola-portfolio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: adetola-portfolio
+  template:
+    metadata:
+      labels:
+        app: adetola-portfolio
+    spec:
+      containers:
+      - name: adetola-container
+        image: teeboss/adetola-portfolio:v6
+        ports:
+        - containerPort: 80
+```
 
-### Steps:
+### Step 2: Create Service Configuration
+
+Create `service.yaml`:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: adetola-service
+spec:
+  selector:
+    app: adetola-portfolio
+  ports:
+  - port: 80
+    targetPort: 80
+    nodePort: 30080
+  type: NodePort
+```
+
+### Step 3: Deploy Application
 
 ```bash
-# Add and update Helm repo
+kubectl apply -f deployment.yaml
+kubectl apply -f service.yaml
+
+# Check status
+kubectl get pods
+kubectl get svc
+```
+
+### Step 4: Access Application
+
+Since Kind runs in Docker, use port forwarding:
+
+```bash
+kubectl port-forward service/adetola-service 8080:80
+```
+
+Then visit: http://localhost:8080
+
+## Phase 3: GitOps with Helm and ArgoCD
+
+### Step 1: Install Helm
+
+```bash
+sudo apt update
+curl https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 | bash
+helm version
+```
+
+### Step 2: Create Helm Chart
+
+```bash
+helm create adetola-portfolio
+```
+
+This creates the following structure:
+```
+adetola-portfolio/
+├── Chart.yaml
+├── values.yaml
+├── templates/
+│   ├── deployment.yaml
+│   ├── service.yaml
+│   └── ...
+```
+
+### Step 3: Configure Helm Chart
+
+Edit `values.yaml`:
+
+```yaml
+image:
+  repository: teeboss/adetola-portfolio
+  pullPolicy: IfNotPresent
+  tag: v6
+
+service:
+  type: NodePort
+  port: 80
+  nodePort: 30080
+```
+
+### Step 4: Deploy with Helm
+
+```bash
+helm install adetola-release ./adetola-portfolio
+
+# Verify deployment
+kubectl get pods
+kubectl get svc
+```
+
+### Step 5: Install ArgoCD
+
+```bash
+# Create namespace and install ArgoCD
+kubectl create namespace argocd
+kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+```
+
+### Step 6: Access ArgoCD UI
+
+#### Option 1: Port Forward (Recommended for local)
+```bash
+kubectl port-forward svc/argocd-server -n argocd 8081:443
+```
+Visit: https://localhost:8081
+
+#### Option 2: NodePort
+```bash
+kubectl patch svc argocd-server -n argocd -p '{
+  "spec": {
+    "type": "NodePort"
+  }
+}'
+
+kubectl get svc argocd-server -n argocd
+```
+
+### Step 7: Get ArgoCD Credentials
+
+```bash
+# Get initial admin password
+kubectl get secret argocd-initial-admin-secret -n argocd \
+  -o jsonpath="{.data.password}" | base64 --decode
+```
+
+- Username: `admin`
+- Password: (from command above)
+
+### Step 8: Setup GitOps Repository
+
+1. Create a GitHub repository (e.g., `adetola-k8s-portfolio`)
+2. Push your Helm chart to the repository:
+
+```
+adetola-k8s-portfolio/
+├── Chart.yaml
+├── values.yaml
+└── templates/
+    ├── deployment.yaml
+    └── service.yaml
+```
+
+### Step 9: Create ArgoCD Application
+
+In the ArgoCD UI:
+
+1. Click **+ NEW APP**
+2. Fill in the form:
+
+| Field | Value |
+|-------|-------|
+| Application Name | adetola-portfolio |
+| Project | default |
+| Sync Policy | Manual |
+| Repository URL | https://github.com/YOUR-USERNAME/adetola-k8s-portfolio.git |
+| Revision | HEAD |
+| Path | . (or folder containing Chart.yaml) |
+| Cluster URL | https://kubernetes.default.svc |
+| Namespace | default |
+
+3. Click **Create**
+4. Click **SYNC** to deploy
+
+### Step 10: Access Application via Port Forward
+
+```bash
+kubectl port-forward service/adetola-release-adetola-portfolio 8081:80
+```
+
+Visit: http://localhost:8081
+
+## Phase 4: Monitoring with Prometheus and Grafana
+
+### Step 1: Install Prometheus and Grafana
+
+```bash
+# Add Prometheus Helm repository
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm repo update
 
-# Install Prometheus + Grafana stack
+# Install kube-prometheus-stack
 helm install monitor prometheus-community/kube-prometheus-stack \
   --namespace monitoring --create-namespace
-
-# Get Grafana admin password
-kubectl get secret monitor-grafana -n monitoring \
-  -o jsonpath="{.data.admin-password}" | base64 -d && echo
-
-# Port-forward Grafana for access
-export POD_NAME=$(kubectl get pods -n monitoring \
-  -l "app.kubernetes.io/name=grafana,app.kubernetes.io/instance=monitor" -o name)
-kubectl port-forward -n monitoring $POD_NAME 3000
 ```
 
-### Grafana Panel Setup:
+### Step 2: Verify Installation
 
-* Log into Grafana at [http://localhost:3000](http://localhost:3000).
-* Use admin credentials from the previous step.
-* Add a new panel and select metrics (e.g., `node_cpu_seconds_total`).
-* Customize and save dashboard.
+```bash
+kubectl get pods -n monitoring
+```
 
----
+You should see pods for:
+- Prometheus
+- Grafana
+- Kube-state-metrics
+- Node-exporter
 
-## ⚠️ Challenges Faced
+### Step 3: Access Grafana
 
-* ArgoCD failed syncing due to immutable Deployment label. Fixed by deleting and re-creating the Deployment.
-* Grafana initially showed 0 CPU usage — due to local environment and metric selection.
-* Issues with port-forwarding and accessing services were resolved by checking pod names carefully and applying correct port-forward commands.
+```bash
+# Get Grafana admin password
+kubectl --namespace monitoring get secrets monitor-grafana \
+  -o jsonpath="{.data.admin-password}" | base64 -d ; echo
 
----
+# Port forward Grafana
+export POD_NAME=$(kubectl --namespace monitoring get pod -l \
+  "app.kubernetes.io/name=grafana,app.kubernetes.io/instance=monitor" -o name)
+kubectl --namespace monitoring port-forward $POD_NAME 3000
+```
 
-## 💡 Future Improvements
+Visit: http://localhost:3000
 
-* [ ] Move cluster to cloud (e.g., AWS EKS)
-* [ ] Add Ingress controller and TLS cert-manager
-* [ ] Expand monitoring to application-specific metrics
-* [ ] Implement authentication for the portfolio app
-* [ ] Add CI/CD pipeline integration (e.g., GitHub Actions)
+- Username: `admin`
+- Password: (from command above)
 
----
+### Step 4: Explore Dashboards
 
-## 📎 Appendix
+In Grafana, navigate to **Dashboards → Browse** to explore:
+- Kubernetes / Nodes
+- Kubernetes / Workloads
+- Pod metrics
+- Memory/CPU usage
+- Deployment status
 
-* Node IP: `172.18.0.2`
-* Portfolio App NodePort: `30080`
-* ArgoCD Dashboard NodePort: `30970`
-* Grafana Dashboard Port: `3000` (via port-forward)
-* GitHub Repo: [adetola-k8s-portfolio](https://github.com/Adetola-Adedoyin/adetola-k8s-portfolio)
+## Troubleshooting
 
+### Common Issues and Solutions
 
+1. **Pod not starting**: Check logs with `kubectl logs <pod-name>`
+2. **Service not accessible**: Verify port forwarding and service configuration
+3. **ArgoCD sync issues**: Check repository URL and path configuration
+4. **Grafana dashboard empty**: Ensure Prometheus is scraping metrics correctly
+
+### Useful Commands
+
+```bash
+# Check cluster status
+kubectl cluster-info
+
+# Watch pod status in real-time
+kubectl get pods -w
+
+# Check service endpoints
+kubectl get endpoints
+
+# View application logs
+kubectl logs -f deployment/adetola-portfolio
+
+# Delete resources
+kubectl delete -f deployment.yaml
+kubectl delete -f service.yaml
+
+# Uninstall Helm release
+helm uninstall adetola-release
+```
+
+## Project Architecture
+
+This project demonstrates:
+
+1. **Containerization**: Application containerized with Docker
+2. **Orchestration**: Deployed on Kubernetes using Kind
+3. **Package Management**: Helm charts for templating and versioning
+4. **GitOps**: ArgoCD for continuous deployment from Git repository
+5. **Monitoring**: Prometheus for metrics collection and Grafana for visualization
+6. **Local Development**: Complete setup running locally for development and testing
+
+## Next Steps
+
+1. Set up automatic sync in ArgoCD for true GitOps workflow
+2. Configure alerting rules in Prometheus
+3. Add custom Grafana dashboards for application-specific metrics
+4. Implement CI/CD pipeline for image building and chart updates
+5. Add ingress controller for external access
+6. Configure persistent storage for stateful applications
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Update documentation
+5. Submit a pull request
+
+## License
+
+This project is open source and available under the [MIT License](LICENSE).
